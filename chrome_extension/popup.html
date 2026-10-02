@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+  <title>ForgePilot Bridge</title>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">FORGEPILOT</div>
+    <h1>Browser bridge</h1>
+    <p class="muted">Paste the one-time pairing bundle created in your private dashboard. Every action still asks for on-page approval.</p>
+    <label for="bundle">Pairing bundle</label>
+    <textarea id="bundle" placeholder='{"version": 1, ...}'></textarea>
+    <div class="buttons"><button id="save">Pair browser</button><button class="quiet" id="clear">Unpair</button></div>
+    <button class="wide" id="poll">Check for a task now</button>
+    <p id="status" role="status"></p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

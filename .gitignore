@@ -1,0 +1,19 @@
+# Secrets and Streamlit state
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# User uploads and local development storage
+local_data/
+*.sqlite3
+
+# Chrome extension packaging
+chrome_extension/*.zip
