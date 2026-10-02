@@ -12,6 +12,7 @@ ForgePilot is a Streamlit workspace for chatting with an OpenRouter model, keepi
 - GitHub OAuth, optional Google OAuth, and email magic-link authentication through Supabase Auth.
 - Supabase Postgres + Storage memory, chats, private file storage, usage windows and browser task relay.
 - A **7-hour active access window**, followed by an **8-hour cooldown**, enforced in the database for authenticated users.
+- Public web research: paste a public `http(s)` URL to read a capped, text-only excerpt and explicitly include it in the next prompt. Local/private URLs, credentials, non-standard ports, and non-text pages are blocked.
 - Kaggle credential upload as a private file vault item (optional; it is not sent to the model by default).
 - A Chrome/Chromium companion extension that can perform approved DOM actions on sites you are authorized to use.
 
@@ -53,7 +54,10 @@ Model catalogue names and which requests are free are controlled by OpenRouter, 
 
 The extension polls only for tasks intended for its paired identifier. Its secret is stored as a hash in Supabase. It only receives a task after a user queues it, and it cannot silently execute actions. Keep the extension disabled when not needed.
 
-## Kaggle and documents
+## Web research, Kaggle, and documents
+
+Use the **Web research** panel to read public HTML or text pages. The reader is intentionally limited to public standard-web URLs and marks retrieved material as untrusted reference context, so it cannot direct the agent to take actions. For an authorized logged-in webpage, use **Browser bridge → Request visible text from current page**; the extension asks for on-page approval and returns only after you approve.
+
 
 Upload `kaggle.json` only if you need it as a private project file. The app does not execute Kaggle commands or expose the credential to prompts automatically. You can upload text, Markdown, JSON, Python, CSV, and PDF reference documents. Select files in the sidebar to add extracted text to a chat turn.
 
