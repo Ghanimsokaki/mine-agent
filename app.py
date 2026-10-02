@@ -17,39 +17,48 @@ from src.auth import (
 from src.browser_actions import action_summary, extract_browser_actions
 from src.config import AppConfig, load_config
 from src.files import extract_generated_files, extract_text, json_download, render_context
+from src.guest import consume_usage as consume_guest_usage, initialize_guest, new_chat as new_guest_chat, usage_status as guest_usage_status
 from src.llm import LLMError, OpenRouterClient, available_models, build_messages
 from src.store import StoreError, SupabaseStore
-from src.usage import ACTIVE_WINDOW, COOLDOWN_WINDOW, UsageStatus, evaluate_usage, format_remaining
+from src.usage import UsageStatus, format_remaining
 
 st.set_page_config(page_title="ForgePilot", page_icon="✦", layout="wide", initial_sidebar_state="expanded")
 
 
 APP_CSS = """
 <style>
-:root { --fp-bg: #1f1f1d; --fp-panel: #292927; --fp-panel-2: #31312e; --fp-text: #f6f1ea; --fp-muted: #b9b4ad; --fp-accent: #d57b5e; --fp-line: #45433f; }
-.stApp { background: radial-gradient(850px 500px at 72% -10%, #44342d 0%, transparent 55%), var(--fp-bg); color: var(--fp-text); }
-[data-testid="stSidebar"] { background: #242421; border-right: 1px solid var(--fp-line); }
-[data-testid="stSidebar"] > div:first-child { padding-top: 1rem; }
-h1, h2, h3 { letter-spacing: -.03em; }
-.fp-brand { font-size: 1.25rem; font-weight: 760; letter-spacing: -.04em; margin: 0; }
-.fp-brand span { color: var(--fp-accent); }
-.fp-tagline { color: var(--fp-muted); font-size: .8rem; margin: .12rem 0 1.2rem; }
-.fp-hero { max-width: 760px; margin: 10vh auto 0; text-align: center; }
-.fp-hero h1 { font-size: clamp(2.3rem, 6vw, 4.6rem); margin-bottom: .4rem; }
-.fp-hero p { color: var(--fp-muted); font-size: 1.05rem; line-height: 1.6; }
-.fp-card { border: 1px solid var(--fp-line); background: rgba(47,47,43,.82); padding: 1rem 1.05rem; border-radius: 13px; margin: .7rem 0; }
-.fp-status { border-radius: 99px; display: inline-block; padding: .23rem .65rem; font-size: .76rem; font-weight: 700; background: #38453a; color: #d5f0d3; }
-.fp-status.cooldown { background: #573c36; color: #ffd0c3; }
-.fp-status.ready { background: #3b4148; color: #d6e6f5; }
+:root { --fp-bg: #fbfbf9; --fp-panel: #f4f4f1; --fp-panel-2: #ecece7; --fp-text: #20201e; --fp-muted: #6e6d68; --fp-accent: #e67859; --fp-line: #e4e3de; --fp-link: #155eac; }
+.stApp { background: var(--fp-bg); color: var(--fp-text); }
+[data-testid="stSidebar"] { background: #fff; border-right: 1px solid var(--fp-line); min-width: 286px; }
+[data-testid="stSidebar"] > div:first-child { padding: .6rem .5rem; }
+h1, h2, h3 { color: var(--fp-text); letter-spacing: -.045em; }
+.fp-brand { color: #1b1b19; font-family: Georgia, 'Times New Roman', serif; font-size: 1.32rem; font-weight: 700; letter-spacing: -.05em; margin: 0; }
+.fp-brand span { color: var(--fp-accent); font-family: ui-sans-serif, system-ui; font-size: 1.45rem; vertical-align: -0.1rem; }
+.fp-tagline { color: var(--fp-muted); font-size: .75rem; margin: .1rem 0 1rem; }
+.fp-nav-label { color: #77756e; font-size: .75rem; font-weight: 650; letter-spacing: .01em; margin: 1.2rem .45rem .35rem; }
+.fp-sidebar-note { color: var(--fp-muted); font-size: .76rem; line-height: 1.35; margin: .6rem .45rem; }
+.fp-hero { max-width: 760px; margin: 17vh auto 0; text-align: center; }
+.fp-hero h1 { color: #1c1b19; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(2.35rem, 5vw, 4.25rem); font-weight: 500; margin: .5rem 0 .65rem; }
+.fp-hero p { color: var(--fp-muted); font-size: 1rem; line-height: 1.55; margin: 0 auto; max-width: 600px; }
+.fp-sun { color: var(--fp-accent); font-size: 2.8rem; line-height: .7; vertical-align: -.2rem; }
+.fp-card { border: 1px solid var(--fp-line); background: #fff; padding: 1rem 1.05rem; border-radius: 12px; margin: .7rem 0; box-shadow: 0 2px 8px rgba(30,30,25,.025); }
+.fp-status { border-radius: 99px; display: inline-block; padding: .23rem .65rem; font-size: .7rem; font-weight: 700; letter-spacing: .02em; background: #e4f1e3; color: #2a6a35; }
+.fp-status.cooldown { background: #fae7e1; color: #9e482f; }
+.fp-status.ready { background: #edf2f7; color: #45647c; }
 .fp-muted { color: var(--fp-muted); font-size: .84rem; line-height: 1.5; }
-[data-testid="stChatMessage"] { border: 1px solid var(--fp-line); border-radius: 14px; padding: .35rem .7rem; margin-bottom: .9rem; background: rgba(42,42,39,.75); }
-[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background: rgba(54,48,44,.72); }
-.stButton > button, .stDownloadButton > button { border-radius: 9px; border: 1px solid #66594f; background: #3a3733; color: var(--fp-text); font-weight: 630; }
-.stButton > button:hover, .stDownloadButton > button:hover { border-color: var(--fp-accent); color: #fff; }
-[data-testid="stChatInput"] { border-radius: 14px; border-color: #5a554e; background: #2c2c29; }
-[data-testid="stExpander"] { border: 1px solid var(--fp-line); border-radius: 10px; background: rgba(42,42,39,.6); }
+.fp-welcome-shell { max-width: 710px; margin: 0 auto; }
+.fp-composer-hint { color: #85827b; text-align: center; font-size: .88rem; margin: .8rem 0; }
+[data-testid="stChatMessage"] { border: 0; border-radius: 12px; padding: .35rem .25rem; margin-bottom: .8rem; background: transparent; }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background: #f1f0ec; padding: .65rem .85rem; }
+.stButton > button, .stDownloadButton > button { border-radius: 9px; border: 1px solid #e2e0db; background: #fff; color: var(--fp-text); font-weight: 590; box-shadow: none; }
+.stButton > button:hover, .stDownloadButton > button:hover { border-color: #c9c5bc; color: var(--fp-text); background: #f7f7f4; }
+[data-testid="stChatInput"] { border-radius: 16px; border: 1px solid #deddd8; background: #fff; box-shadow: 0 3px 12px rgba(30,30,25,.05); }
+[data-testid="stChatInput"] textarea { color: var(--fp-text); }
+[data-testid="stExpander"] { border: 1px solid var(--fp-line); border-radius: 10px; background: #fff; }
+[data-testid="stSidebar"] .stButton > button { justify-content: flex-start; text-align: left; width: 100%; }
 hr { border-color: var(--fp-line); }
-code { color: #ffd5bd; }
+code { color: #a24f37; }
+a { color: var(--fp-link); }
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
@@ -64,8 +73,8 @@ def get_config() -> AppConfig:
 
 def app_header(config: AppConfig) -> None:
     with st.sidebar:
-        st.markdown(f'<p class="fp-brand"><span>✦</span> {config.app_name}</p>', unsafe_allow_html=True)
-        st.markdown('<p class="fp-tagline">Private agent workspace</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="fp-brand"><span>✺</span> {config.app_name}</p>', unsafe_allow_html=True)
+        st.markdown('<p class="fp-tagline">Personal AI workspace</p>', unsafe_allow_html=True)
 
 
 def clean_callback_code() -> str | None:
@@ -75,68 +84,105 @@ def clean_callback_code() -> str | None:
     return str(code) if code else None
 
 
-def render_auth(config: AppConfig, store: SupabaseStore) -> SignedInUser | None:
-    """Render Supabase sign-in choices. No user password is handled by this app."""
+def restore_or_complete_auth(store: SupabaseStore) -> SignedInUser | None:
+    """Restore a server-side session or finish an OAuth redirect before UI renders."""
     code = clean_callback_code()
     if code:
         try:
             user = complete_oauth_callback(store, st.session_state, code)
             if user:
                 st.query_params.clear()
-                st.rerun()
+                return user
         except StoreError as exc:
-            st.error(str(exc))
+            st.session_state["auth_error"] = str(exc)
             st.query_params.clear()
+    return restore_session(store, st.session_state)
 
-    user = restore_session(store, st.session_state)
-    if user:
-        return user
 
-    st.markdown('<section class="fp-hero"><div class="fp-status ready">PRIVATE WORKSPACE</div><h1>Think. Build. Approve.</h1><p>Chat with your chosen OpenRouter model, keep project memory private, and send only explicitly approved tasks to your paired browser.</p></section>', unsafe_allow_html=True)
-    left, middle, right = st.columns([1, 1.25, 1])
-    with middle:
-        st.markdown("<div class='fp-card'>", unsafe_allow_html=True)
-        st.subheader("Sign in to continue")
-        st.caption("ForgePilot uses Supabase Auth. It never collects your GitHub password.")
-        try:
-            github_url = begin_oauth(store, "github", config.public_url)
-            st.link_button("Continue with GitHub", github_url, use_container_width=True)
-            if config.google_oauth_enabled:
-                google_url = begin_oauth(store, "google", config.public_url)
-                st.link_button("Continue with Google", google_url, use_container_width=True)
-        except StoreError as exc:
-            st.warning(str(exc))
+def render_sign_in_options(config: AppConfig, store: SupabaseStore) -> None:
+    """Account choices for visitors. No password is handled in this interface."""
+    if error := st.session_state.pop("auth_error", None):
+        st.error(error)
+    st.markdown("<div class='fp-card'>", unsafe_allow_html=True)
+    st.subheader("Save your work with an account")
+    st.caption("GitHub, Google, and email are handled by Supabase Auth. ForgePilot never sees your provider password.")
+    try:
+        github_url = begin_oauth(store, "github", config.public_url)
+        st.link_button("Continue with GitHub", github_url, use_container_width=True)
+        if config.google_oauth_enabled:
+            google_url = begin_oauth(store, "google", config.public_url)
+            st.link_button("Continue with Google", google_url, use_container_width=True)
+    except StoreError as exc:
+        st.warning(str(exc))
 
-        st.divider()
-        st.markdown("**Email sign-in**")
-        with st.form("email_link_form", clear_on_submit=False):
-            email = st.text_input("Email address", placeholder="you@example.com")
-            submitted = st.form_submit_button("Send sign-in email", use_container_width=True)
-        if submitted:
-            if "@" not in email:
-                st.error("Enter a valid email address.")
-            else:
-                try:
-                    send_email_code(store, email.strip(), config.public_url)
-                    st.session_state["pending_email"] = email.strip()
-                    st.success("Check your email. Open the secure link, or enter a Supabase email token below if your template uses tokens.")
-                except StoreError as exc:
-                    st.error(str(exc))
-        with st.expander("Have an email token instead?"):
-            with st.form("email_code_form"):
-                token_email = st.text_input("Email", value=st.session_state.get("pending_email", ""), key="token_email")
-                token = st.text_input("Email token", type="password", help="This is a short Supabase email token, not your password.")
-                verify = st.form_submit_button("Verify email token")
-            if verify:
-                try:
-                    user = verify_email_code(store, st.session_state, token_email.strip(), token)
-                    if user:
-                        st.rerun()
-                    st.error("The token did not create a session.")
-                except StoreError as exc:
-                    st.error(str(exc))
-        st.markdown("</div>", unsafe_allow_html=True)
-    return None
+    st.divider()
+    with st.form("email_link_form", clear_on_submit=False):
+        email = st.text_input("Email address", placeholder="you@example.com")
+        submitted = st.form_submit_button("Send sign-in email", use_container_width=True)
+    if submitted:
+        if "@" not in email:
+            st.error("Enter a valid email address.")
+        else:
+            try:
+                send_email_code(store, email.strip(), config.public_url)
+                st.session_state["pending_email"] = email.strip()
+                st.success("Check your email. Open the secure link, or enter a Supabase email token below if your template uses tokens.")
+            except StoreError as exc:
+                st.error(str(exc))
+    with st.expander("Have an email token instead?"):
+        with st.form("email_code_form"):
+            token_email = st.text_input("Email", value=st.session_state.get("pending_email", ""), key="token_email")
+            token = st.text_input("Email token", type="password", help="This is a short Supabase email token, not your password.")
+            verify = st.form_submit_button("Verify email token")
+        if verify:
+            try:
+                user = verify_email_code(store, st.session_state, token_email.strip(), token)
+                if user:
+                    st.rerun()
+                st.error("The token did not create a session.")
+            except StoreError as exc:
+                st.error(str(exc))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def start_guest_mode() -> None:
+    st.session_state["guest_mode"] = True
+    initialize_guest(st.session_state)
+    st.rerun()
+
+
+def render_visitor_landing(config: AppConfig, store: SupabaseStore | None) -> None:
+    """Public starting screen: visitors can use the temporary guest workspace."""
+    with st.sidebar:
+        if st.button("＋  New", key="visitor-new", use_container_width=True):
+            start_guest_mode()
+        st.markdown("<p class='fp-nav-label'>WORKSPACE</p>", unsafe_allow_html=True)
+        st.button("▱  Projects", key="visitor-projects", disabled=True, use_container_width=True)
+        st.button("◇  Artifacts", key="visitor-artifacts", disabled=True, use_container_width=True)
+        st.button("⌘  Code", key="visitor-code", disabled=True, use_container_width=True)
+        st.markdown("<p class='fp-nav-label'>ACCOUNT</p>", unsafe_allow_html=True)
+        if store and st.button("Sign in", key="visitor-sign-in", use_container_width=True):
+            st.session_state["show_sign_in"] = True
+        if st.button("Try without an account", key="visitor-guest", use_container_width=True):
+            start_guest_mode()
+        st.markdown("<p class='fp-sidebar-note'>Guest chats are temporary. Sign in to save chats, files, memory, and browser connections.</p>", unsafe_allow_html=True)
+
+    toolbar_left, toolbar_right = st.columns([5, 1])
+    with toolbar_right:
+        if store:
+            st.caption("Guest plan · Sign in")
+        else:
+            st.caption("Guest plan")
+    st.markdown("<section class='fp-hero'><div><span class='fp-sun'>✺</span></div><h1>Welcome to ForgePilot</h1><p>Ask a question now, then sign in whenever you want your chats, files, memory, and browser connections saved.</p></section>", unsafe_allow_html=True)
+    center_left, center, center_right = st.columns([1, 1.42, 1])
+    with center:
+        if st.button("Try chat without an account", key="hero-guest", use_container_width=True):
+            start_guest_mode()
+        st.markdown("<p class='fp-composer-hint'>Temporary guest chat · no account required</p>", unsafe_allow_html=True)
+        if store and st.session_state.get("show_sign_in"):
+            render_sign_in_options(config, store)
+        elif not store:
+            st.info("Sign-in is available after Supabase is configured. You can still open the guest workspace now; add an OpenRouter key to make live requests.")
 
 
 def status_badge(status: UsageStatus) -> None:
@@ -167,7 +213,7 @@ def render_generated_downloads(content: str, key_prefix: str) -> None:
             )
 
 
-def render_message(message: dict[str, Any], index: int, store: SupabaseStore, selected_agent: str | None) -> None:
+def render_message(message: dict[str, Any], index: int, store: SupabaseStore | None, selected_agent: str | None) -> None:
     role = message.get("role", "assistant")
     with st.chat_message(role):
         st.markdown(str(message.get("content", "")))
@@ -413,6 +459,94 @@ def append_browser_result_if_needed(messages: list[dict[str, Any]], store: Supab
     return messages
 
 
+def render_guest_sidebar(status: UsageStatus, has_supabase: bool) -> None:
+    with st.sidebar:
+        if st.button("＋  New", key="guest-new", use_container_width=True):
+            new_guest_chat(st.session_state)
+            st.rerun()
+        st.markdown("<p class='fp-nav-label'>WORKSPACE</p>", unsafe_allow_html=True)
+        st.button("▱  Projects", key="guest-projects", disabled=True, use_container_width=True)
+        st.button("◇  Artifacts", key="guest-artifacts", disabled=True, use_container_width=True)
+        st.button("⌘  Code", key="guest-code", disabled=True, use_container_width=True)
+        st.markdown("<p class='fp-nav-label'>GUEST CHAT</p>", unsafe_allow_html=True)
+        status_badge(status)
+        st.markdown("<p class='fp-sidebar-note'>Guest chats and attachments are held only for this browser session. Sign in to use private cloud memory, files, connectors, and the browser bridge.</p>", unsafe_allow_html=True)
+        if has_supabase:
+            if st.button("Sign in to save work", key="guest-sign-in", use_container_width=True):
+                st.session_state.pop("guest_mode", None)
+                st.session_state["show_sign_in"] = True
+                st.rerun()
+        else:
+            st.caption("Sign-in will appear after Supabase is configured.")
+
+
+def guest_document_context() -> str:
+    with st.sidebar.expander("Attach temporary context", expanded=False):
+        st.caption("This attachment is available for the current guest session only. It is not sent anywhere until you send a chat request.")
+        upload = st.file_uploader(
+            "Document or code file",
+            type=["txt", "md", "pdf", "py", "js", "ts", "json", "csv", "yaml", "yml", "toml", "html", "css", "sql"],
+            key="guest_attachment",
+        )
+        if not upload:
+            return ""
+        raw = upload.getvalue()
+        if len(raw) > 5 * 1024 * 1024:
+            st.warning("Guest attachments are limited to 5 MB. Sign in for the private file vault.")
+            return ""
+        st.caption(f"Ready to include: {upload.name}")
+        return render_context([(upload.name, extract_text(upload.name, raw))])
+
+
+def run_guest_workspace(config: AppConfig) -> None:
+    """A useful, deliberately ephemeral chat path that does not need an account."""
+    initialize_guest(st.session_state)
+    usage = guest_usage_status(st.session_state)
+    render_guest_sidebar(usage, config.has_supabase)
+    document_context = guest_document_context()
+
+    toolbar_left, toolbar_right = st.columns([3.4, 1])
+    with toolbar_left:
+        st.markdown("<p class='fp-muted'>Guest workspace · temporary chat · sign in anytime to save your work</p>", unsafe_allow_html=True)
+    with toolbar_right:
+        model = model_picker(config)
+
+    messages: list[dict[str, Any]] = st.session_state["guest_messages"]
+    if not messages:
+        st.markdown("<section class='fp-hero'><div><span class='fp-sun'>✺</span></div><h1>What would you like to build?</h1><p>Draft code, review a file, plan a task, or generate a downloadable project file. Your guest chat is not saved to an account.</p></section>", unsafe_allow_html=True)
+    for index, message in enumerate(messages):
+        render_message(message, index, None, None)
+
+    live_ready = config.has_openrouter and usage.allowed
+    if not config.has_openrouter:
+        st.info("Guest chat is ready, but this deployment needs an OpenRouter API key in its server secrets before it can generate a response.")
+    if usage.state == "cooldown":
+        st.warning(f"This guest session is cooling down for {format_remaining(usage.remaining)}.")
+
+    prompt = st.chat_input("How can I help you today?", disabled=not live_ready)
+    if not prompt:
+        return
+    spent = consume_guest_usage(st.session_state)
+    if not spent.allowed:
+        st.error(f"This guest session is cooling down. Try again in {format_remaining(spent.remaining)}.")
+        return
+
+    messages.append({"id": f"guest-user-{len(messages)}", "role": "user", "content": prompt})
+    try:
+        client = OpenRouterClient(config.openrouter_key, config.openrouter_site_url, config.app_name)
+        llm_messages = build_messages(messages, [], document_context)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                completion = client.complete(model.strip(), llm_messages)
+            st.markdown(completion.content)
+            render_generated_downloads(completion.content, "guest-new-response")
+        messages.append({"id": f"guest-assistant-{len(messages)}", "role": "assistant", "content": completion.content, "model": completion.model})
+        st.rerun()
+    except LLMError as exc:
+        # Keep the guest's question visible; they can retry once the host has configured a key.
+        st.error(str(exc))
+
+
 def run_workspace(config: AppConfig, store: SupabaseStore, user: SignedInUser) -> None:
     try:
         store.ensure_profile(user.id, user.email)
@@ -487,30 +621,22 @@ def run_workspace(config: AppConfig, store: SupabaseStore, user: SignedInUser) -
         st.error(str(exc))
 
 
-def render_configuration_landing(config: AppConfig) -> None:
-    st.markdown('<section class="fp-hero"><div class="fp-status ready">SETUP REQUIRED</div><h1>Your private agent workspace.</h1><p>Configure Supabase Auth and storage plus an OpenRouter API key to enable secure chat, OAuth accounts, durable memory, downloadable files, and the consent-first browser bridge.</p></section>', unsafe_allow_html=True)
-    a, b, c = st.columns(3)
-    for column, title, text in (
-        (a, "1 · Secrets", "Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml`. Keep it untracked."),
-        (b, "2 · Supabase", "Run `supabase/schema.sql`, configure Auth redirect URLs, then add your project URL and anon key."),
-        (c, "3 · OpenRouter", "Add a verified model ID and key. Free models can be rate-limited or unavailable."),
-    ):
-        with column:
-            st.markdown(f"<div class='fp-card'><b>{title}</b><br><span class='fp-muted'>{text}</span></div>", unsafe_allow_html=True)
-    st.info("Read the README for OAuth, storage, Kaggle vault, usage-limit, and browser-extension setup. No provider key or credential is embedded in this source tree.")
-
-
 def main() -> None:
     config = get_config()
     app_header(config)
-    if not config.has_supabase:
-        render_configuration_landing(config)
+    store = SupabaseStore(config.supabase_url, config.supabase_anon_key) if config.has_supabase else None
+
+    # Always process an OAuth callback before deciding whether this visitor is in guest mode.
+    user = restore_or_complete_auth(store) if store else None
+    if user and store:
+        st.session_state.pop("guest_mode", None)
+        run_workspace(config, store, user)
         return
-    store = SupabaseStore(config.supabase_url, config.supabase_anon_key)
-    user = render_auth(config, store)
-    if not user:
+
+    if st.session_state.get("guest_mode"):
+        run_guest_workspace(config)
         return
-    run_workspace(config, store, user)
+    render_visitor_landing(config, store)
 
 
 if __name__ == "__main__":

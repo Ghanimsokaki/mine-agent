@@ -6,7 +6,8 @@ ForgePilot is a Streamlit workspace for chatting with an OpenRouter model, keepi
 
 ## Included
 
-- Claude-inspired Streamlit chat UI with conversation history, file context and downloads.
+- Clean, familiar assistant-workspace UI with a light sidebar, focused welcome composer, conversation history, file context and downloads.
+- **No-account guest chat**: visitors can start a temporary chat without Supabase or OAuth. Guest messages, attachments, and the local 7-hour window exist only for the current Streamlit session; sign in to save work and enforce limits across devices.
 - Configurable OpenRouter model picker. It includes the requested `hwiiiiiiii/gemby-agent-3b:free` identifier as a configurable option and an NVIDIA Nemotron Ultra option. OpenRouter's free catalogue/rate limits change; select a model actually available to your account.
 - GitHub OAuth, optional Google OAuth, and email magic-link authentication through Supabase Auth.
 - Supabase Postgres + Storage memory, chats, private file storage, usage windows and browser task relay.
