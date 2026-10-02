@@ -1,6 +1,6 @@
 # ForgePilot — consent-first browser coding agent
 
-ForgePilot is a Streamlit workspace for chatting with an OpenRouter model, keeping private working memory in Supabase, producing downloadable files, and **optionally** sending narrowly scoped actions to a locally installed browser extension.
+ForgePilot is a Streamlit workspace for chatting with a Hugging Face primary model (and optional OpenRouter fallback), keeping private working memory in Supabase, producing downloadable files, and **optionally** sending narrowly scoped actions to a locally installed browser extension.
 
 > Browser automation is intentionally consent-first. The extension asks on the page before it reads, clicks, types, or inserts code. It cannot work on browser-internal pages, Chrome Web Store pages, or sites that block extensions. Do not use it to bypass paywalls, CAPTCHAs, access controls, or a site's terms.
 
@@ -8,9 +8,9 @@ ForgePilot is a Streamlit workspace for chatting with an OpenRouter model, keepi
 
 - Clean, familiar assistant-workspace UI with a light sidebar, focused welcome composer, conversation history, file context and downloads.
 - **No-account guest chat**: visitors can start a temporary chat without Supabase or OAuth. Guest messages, attachments, and the local 7-hour window exist only for the current Streamlit session; sign in to save work and enforce limits across devices.
-- Configurable OpenRouter model picker. It includes the requested `hwiiiiiiii/gemby-agent-3b:free` identifier as a configurable option and an NVIDIA Nemotron Ultra option. OpenRouter's free catalogue/rate limits change; select a model actually available to your account.
+- Configurable provider-aware model picker. The requested Hugging Face `hwiiiiiiii/gemby-agent-3b` is the primary choice; NVIDIA Nemotron Ultra remains an optional OpenRouter fallback. Verify actual provider availability before deployment.
 - GitHub OAuth, optional Google OAuth, and email magic-link authentication through Supabase Auth.
-- Supabase Postgres + Storage memory, chats, private file storage, usage windows and browser task relay.
+- Supabase Postgres + Storage memory, chats, private file storage, usage windows, browser task relay, and a server-side administrator allow-list for `emir.erningpraja@gmail.com`.
 - A **7-hour active access window**, followed by an **8-hour cooldown**, enforced in the database for authenticated users.
 - Public web research: paste a public `http(s)` URL to read a capped, text-only excerpt and explicitly include it in the next prompt. Local/private URLs, credentials, non-standard ports, and non-text pages are blocked.
 - Kaggle credential upload as a private file vault item (optional; it is not sent to the model by default).
@@ -36,13 +36,15 @@ The interface launches in a local-only preview without Supabase, but production 
 4. Enable GitHub in **Authentication → Providers**. Create the GitHub OAuth app with the Supabase callback URL shown by Supabase. Optionally enable Google.
 5. Create the private `agent-files` bucket, either through the SQL migration or dashboard.
 6. Copy only the project URL and **anon/publishable** key into `.streamlit/secrets.toml`. Never put a Supabase `service_role` key in Streamlit secrets.
-7. Add an OpenRouter key to `openrouter.api_key` in your local untracked file or deployment secret manager.
+7. Add a Hugging Face token to `huggingface.api_key` in your local untracked file or deployment secret manager. Add an OpenRouter key only if you also want the NVIDIA fallback.
 
 The app uses Supabase PKCE OAuth. Add every deployed Streamlit URL to Supabase redirect allow-lists. For deployment, set `app.public_url` to the final HTTPS address.
 
-### Model note
+### Model and administrator note
 
-Model catalogue names and which requests are free are controlled by OpenRouter, not this app. The requested `hwiiiiiiii/gemby-agent-3b` string may not be a currently published ID. Keep it configurable, check [OpenRouter Models](https://openrouter.ai/models), and place a verified ID in `openrouter.primary_model`. The NVIDIA option is similarly configurable. A free model can still be rate limited or unavailable.
+The primary model is configured as `hwiiiiiiii/gemby-agent-3b` through the Hugging Face OpenAI-compatible Inference Providers chat endpoint. Create a fine-grained Hugging Face token with permission to make Inference Provider calls and put it in `huggingface.api_key`. A model must be available through the selected Hugging Face endpoint; if Gemby is served on a custom endpoint, replace `huggingface.chat_endpoint` with that endpoint. NVIDIA Nemotron remains optional through OpenRouter and may be rate limited or unavailable.
+
+The Supabase migration seeds `emir.erningpraja@gmail.com` into the private `admin_users` allow-list. After that email signs in, ForgePilot verifies the role server-side using the signed Supabase JWT and displays the Administrator account status. Re-run the supplied SQL migration after updating an existing project.
 
 ## Browser bridge
 

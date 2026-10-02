@@ -38,6 +38,7 @@ Keep ordinary prose outside that block."""
 class ModelChoice:
     label: str
     model_id: str
+    provider: str
     description: str
 
 
@@ -47,11 +48,12 @@ class Completion:
     model: str
 
 
-def available_models(primary: str, nemotron: str) -> list[ModelChoice]:
+def available_models(huggingface_model: str, nemotron_model: str) -> list[ModelChoice]:
     return [
-        ModelChoice("Requested agent model", primary, "Configurable requested model; verify its OpenRouter ID."),
-        ModelChoice("NVIDIA Nemotron Ultra", nemotron, "Strong NVIDIA option; free availability is controlled by OpenRouter."),
-        ModelChoice("Custom OpenRouter model", "__custom__", "Use any model ID available to your OpenRouter account."),
+        ModelChoice("Gemby Agent 3B", huggingface_model, "huggingface", "Primary Hugging Face model."),
+        ModelChoice("NVIDIA Nemotron Ultra", nemotron_model, "openrouter", "Optional strong OpenRouter model; availability is provider controlled."),
+        ModelChoice("Custom Hugging Face model", "__custom_huggingface__", "huggingface", "Use a Hugging Face Inference Provider model ID."),
+        ModelChoice("Custom OpenRouter model", "__custom_openrouter__", "openrouter", "Use an OpenRouter model ID available to this deployment."),
     ]
 
 
@@ -76,36 +78,36 @@ def build_messages(
     return packed
 
 
-class OpenRouterClient:
-    endpoint = "https://openrouter.ai/api/v1/chat/completions"
+class OpenAICompatibleClient:
+    """Minimal client for chat-completion endpoints with the OpenAI response shape."""
 
-    def __init__(self, api_key: str, site_url: str, app_name: str = "ForgePilot"):
+    def __init__(self, api_key: str, endpoint: str, provider_name: str, extra_headers: dict[str, str] | None = None):
         self.api_key = api_key
-        self.site_url = site_url
-        self.app_name = app_name
+        self.endpoint = endpoint
+        self.provider_name = provider_name
+        self.extra_headers = extra_headers or {}
 
     def complete(self, model: str, messages: list[dict[str, str]]) -> Completion:
         if not self.api_key:
-            raise LLMError("Add OPENROUTER_API_KEY to Streamlit secrets before sending a live request.")
-        if not model or model == "__custom__":
-            raise LLMError("Choose a valid OpenRouter model ID.")
+            raise LLMError(f"Add a {self.provider_name} API key to Streamlit secrets before sending a live request.")
+        if not model or model.startswith("__custom_"):
+            raise LLMError("Choose a valid model ID.")
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": self.site_url,
-            "X-Title": self.app_name,
+            **self.extra_headers,
         }
-        payload = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 4096}
+        payload = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 4096, "stream": False}
         try:
             response = requests.post(self.endpoint, headers=headers, json=payload, timeout=90)
         except requests.RequestException as exc:
-            raise LLMError("OpenRouter could not be reached. Check your network and try again.") from exc
+            raise LLMError(f"{self.provider_name} could not be reached. Check your network and try again.") from exc
         if not response.ok:
             try:
                 detail = response.json().get("error", {}).get("message", "")
             except ValueError:
                 detail = ""
-            message = "OpenRouter rejected this request. Verify your key, model ID, and model availability."
+            message = f"{self.provider_name} rejected this request. Verify the token, model ID, and model availability."
             if detail:
                 message += f" Details: {detail[:350]}"
             raise LLMError(message)
@@ -113,7 +115,24 @@ class OpenRouterClient:
             body = response.json()
             content = body["choices"][0]["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise LLMError("OpenRouter returned an unreadable response.") from exc
+            raise LLMError(f"{self.provider_name} returned an unreadable response.") from exc
         if not isinstance(content, str) or not content.strip():
-            raise LLMError("The model returned an empty response.")
+            raise LLMError(f"{self.provider_name} returned an empty response.")
         return Completion(content=content.strip(), model=str(body.get("model") or model))
+
+
+class HuggingFaceClient(OpenAICompatibleClient):
+    def __init__(self, api_key: str, endpoint: str):
+        super().__init__(api_key, endpoint, "Hugging Face")
+
+
+class OpenRouterClient(OpenAICompatibleClient):
+    endpoint = "https://openrouter.ai/api/v1/chat/completions"
+
+    def __init__(self, api_key: str, site_url: str, app_name: str = "ForgePilot"):
+        super().__init__(
+            api_key,
+            self.endpoint,
+            "OpenRouter",
+            {"HTTP-Referer": site_url, "X-Title": app_name},
+        )

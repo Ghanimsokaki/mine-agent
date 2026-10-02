@@ -18,7 +18,7 @@ from src.browser_actions import action_summary, extract_browser_actions
 from src.config import AppConfig, load_config
 from src.files import extract_generated_files, extract_text, json_download, render_context
 from src.guest import consume_usage as consume_guest_usage, initialize_guest, new_chat as new_guest_chat, usage_status as guest_usage_status
-from src.llm import LLMError, OpenRouterClient, available_models, build_messages
+from src.llm import HuggingFaceClient, LLMError, ModelChoice, OpenRouterClient, available_models, build_messages
 from src.store import StoreError, SupabaseStore
 from src.usage import UsageStatus, format_remaining
 from src.web import WebFetchError, fetch_public_page
@@ -437,11 +437,16 @@ def conversation_controls(store: SupabaseStore) -> tuple[str, list[dict[str, Any
         return current, conversations
 
 
-def sidebar_account(store: SupabaseStore, user: SignedInUser, status: UsageStatus) -> None:
+def sidebar_account(store: SupabaseStore, user: SignedInUser, status: UsageStatus, is_admin: bool) -> None:
     with st.sidebar:
         st.divider()
         status_badge(status)
         st.caption(f"Signed in as {user.email or 'account'} via {user.provider}.")
+        if is_admin:
+            st.success("Administrator account")
+            with st.expander("Admin status", expanded=False):
+                st.caption("Your role is verified by the private Supabase administrator allow-list, not a client-side email field.")
+                st.caption("Secrets remain in Streamlit Cloud or the deployment host; they are never displayed in the workspace.")
         if st.button("Sign out", use_container_width=True):
             store.sign_out()
             for key in ("auth_tokens", "auth_user", "conversation_id", "pairing_bundle", "selected_file_ids"):
@@ -449,15 +454,37 @@ def sidebar_account(store: SupabaseStore, user: SignedInUser, status: UsageStatu
             st.rerun()
 
 
-def model_picker(config: AppConfig) -> str:
-    choices = available_models(config.primary_model, config.nemotron_model)
+def model_picker(config: AppConfig) -> ModelChoice:
+    choices = available_models(config.huggingface_model, config.nemotron_model)
     labels = [choice.label for choice in choices]
     selection = st.selectbox("Model", labels, key="model_choice", label_visibility="collapsed")
     choice = next(item for item in choices if item.label == selection)
-    if choice.model_id == "__custom__":
-        return st.text_input("OpenRouter model ID", placeholder="provider/model:free", key="custom_model")
+    if choice.model_id == "__custom_huggingface__":
+        model_id = st.text_input("Hugging Face model ID", placeholder="org/model", key="custom_huggingface_model")
+        return ModelChoice(choice.label, model_id, "huggingface", choice.description)
+    if choice.model_id == "__custom_openrouter__":
+        model_id = st.text_input("OpenRouter model ID", placeholder="provider/model", key="custom_openrouter_model")
+        return ModelChoice(choice.label, model_id, "openrouter", choice.description)
     st.caption(choice.description)
-    return choice.model_id
+    return choice
+
+
+def model_is_configured(config: AppConfig, model: ModelChoice) -> bool:
+    if not model.model_id.strip():
+        return False
+    return config.has_huggingface if model.provider == "huggingface" else config.has_openrouter
+
+
+def model_setup_message(model: ModelChoice) -> str:
+    if model.provider == "huggingface":
+        return "Add a Hugging Face Inference Provider token to Streamlit secrets to enable this model."
+    return "Add an OpenRouter API key to Streamlit secrets to enable this model."
+
+
+def model_client(config: AppConfig, model: ModelChoice) -> HuggingFaceClient | OpenRouterClient:
+    if model.provider == "huggingface":
+        return HuggingFaceClient(config.huggingface_key, config.huggingface_endpoint)
+    return OpenRouterClient(config.openrouter_key, config.openrouter_site_url, config.app_name)
 
 
 def append_browser_result_if_needed(messages: list[dict[str, Any]], store: SupabaseStore, conversation_id: str) -> list[dict[str, Any]]:
@@ -583,9 +610,10 @@ def run_guest_workspace(config: AppConfig) -> None:
     for index, message in enumerate(messages):
         render_message(message, index, None, None)
 
-    live_ready = config.has_openrouter and usage.allowed
-    if not config.has_openrouter:
-        st.info("Guest chat is ready, but this deployment needs an OpenRouter API key in its server secrets before it can generate a response.")
+    provider_ready = model_is_configured(config, model)
+    live_ready = provider_ready and usage.allowed
+    if not provider_ready:
+        st.info(f"Guest chat is ready, but {model_setup_message(model)}")
     if usage.state == "cooldown":
         st.warning(f"This guest session is cooling down for {format_remaining(usage.remaining)}.")
 
@@ -599,11 +627,11 @@ def run_guest_workspace(config: AppConfig) -> None:
 
     messages.append({"id": f"guest-user-{len(messages)}", "role": "user", "content": prompt})
     try:
-        client = OpenRouterClient(config.openrouter_key, config.openrouter_site_url, config.app_name)
+        client = model_client(config, model)
         llm_messages = build_messages(messages, [], document_context)
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
-                completion = client.complete(model.strip(), llm_messages)
+                completion = client.complete(model.model_id.strip(), llm_messages)
             st.markdown(completion.content)
             render_generated_downloads(completion.content, "guest-new-response")
         messages.append({"id": f"guest-assistant-{len(messages)}", "role": "assistant", "content": completion.content, "model": completion.model})
@@ -617,6 +645,7 @@ def run_workspace(config: AppConfig, store: SupabaseStore, user: SignedInUser) -
     try:
         store.ensure_profile(user.id, user.email)
         usage = store.usage_status()
+        is_admin = store.is_current_admin()
     except StoreError as exc:
         st.error(str(exc))
         return
@@ -627,7 +656,7 @@ def run_workspace(config: AppConfig, store: SupabaseStore, user: SignedInUser) -
     render_memory_panel(store)
     selected_agent = render_browser_panel(config, store)
     render_manual_browser_task(store, selected_agent)
-    sidebar_account(store, user, usage)
+    sidebar_account(store, user, usage, is_admin)
 
     st.markdown("## Workspace")
     top_left, top_right = st.columns([3, 1])
@@ -648,9 +677,10 @@ def run_workspace(config: AppConfig, store: SupabaseStore, user: SignedInUser) -
     for index, message in enumerate(messages):
         render_message(message, index, store, selected_agent)
 
-    live_ready = config.has_openrouter and usage.allowed
-    if not config.has_openrouter:
-        st.warning("Add an OpenRouter API key in Streamlit secrets to enable live model requests. The key is not included in this repository.")
+    provider_ready = model_is_configured(config, model)
+    live_ready = provider_ready and usage.allowed
+    if not provider_ready:
+        st.warning(model_setup_message(model))
     if usage.state == "cooldown":
         st.warning(f"Access is cooling down for {format_remaining(usage.remaining)}. Chat is disabled until it ends.")
 
@@ -674,10 +704,10 @@ def run_workspace(config: AppConfig, store: SupabaseStore, user: SignedInUser) -
         document_context = merge_contexts(read_selected_context(store, selected_files), web_context)
         memories = store.recent_memories()
         llm_messages = build_messages(messages, memories, document_context)
-        client = OpenRouterClient(config.openrouter_key, config.openrouter_site_url, config.app_name)
+        client = model_client(config, model)
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
-                completion = client.complete(model.strip(), llm_messages)
+                completion = client.complete(model.model_id.strip(), llm_messages)
             st.markdown(completion.content)
             render_generated_downloads(completion.content, "new-response")
         store.save_message(conversation_id, "assistant", completion.content, completion.model)

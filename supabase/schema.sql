@@ -11,6 +11,29 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Administrator allow-list. This is intentionally not client-readable.
+-- Change the address only through a project-owner SQL migration.
+create table if not exists public.admin_users (
+  email text primary key,
+  created_at timestamptz not null default now()
+);
+insert into public.admin_users (email)
+values ('emir.erningpraja@gmail.com')
+on conflict (email) do nothing;
+
+create or replace function public.is_current_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.admin_users
+    where lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+  );
+$$;
+
 create table if not exists public.usage_windows (
   user_id uuid primary key references auth.users(id) on delete cascade,
   started_at timestamptz not null default now(),
@@ -112,6 +135,7 @@ values ('agent-files', 'agent-files', false, 52428800)
 on conflict (id) do update set public = false, file_size_limit = 52428800;
 
 alter table public.profiles enable row level security;
+alter table public.admin_users enable row level security;
 alter table public.usage_windows enable row level security;
 alter table public.conversations enable row level security;
 alter table public.messages enable row level security;
@@ -287,6 +311,8 @@ begin
 end;
 $$;
 
+revoke all on function public.is_current_admin() from public;
+grant execute on function public.is_current_admin() to authenticated;
 revoke all on function public.consume_usage_window() from public;
 grant execute on function public.consume_usage_window() to authenticated;
 revoke all on function public.browser_secret_valid(uuid, text) from public;

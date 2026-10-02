@@ -168,6 +168,17 @@ class SupabaseStore:
             self._raise("Could not read this private file.", exc)
 
     # ---- account-wide usage window -------------------------------------------------
+    def is_current_admin(self) -> bool:
+        """Check the server-side Supabase administrator allow-list for this JWT."""
+        try:
+            response = self.client.rpc("is_current_admin", {}).execute()
+            data = response.data
+            if isinstance(data, list):
+                data = data[0] if data else False
+            return bool(data)
+        except Exception as exc:
+            self._raise("Could not verify the administrator role.", exc)
+
     def usage_status(self) -> UsageStatus:
         try:
             response = self.client.table("usage_windows").select("started_at,cooldown_until").maybe_single().execute()
