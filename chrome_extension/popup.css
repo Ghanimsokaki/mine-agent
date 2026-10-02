@@ -1,0 +1,15 @@
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+body { margin: 0; width: 340px; background: #20201e; color: #f4f0ea; }
+main { padding: 18px; }
+.eyebrow { color: #db8265; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+h1 { margin: 5px 0 8px; font-size: 21px; }
+p, label { font-size: 12px; line-height: 1.45; }
+.muted { color: #c6c0b8; }
+label { display: block; margin: 14px 0 5px; font-weight: 700; }
+textarea { box-sizing: border-box; width: 100%; min-height: 120px; resize: vertical; border: 1px solid #55514c; border-radius: 8px; background: #292927; color: #f4f0ea; padding: 8px; font: 11px ui-monospace, monospace; }
+.buttons { display: flex; gap: 8px; margin-top: 10px; }
+button { appearance: none; border: 0; border-radius: 7px; background: #dc8265; color: #1d1715; font-weight: 750; padding: 8px 10px; cursor: pointer; }
+button.quiet { background: #42413d; color: #f4f0ea; }
+button.wide { width: 100%; margin-top: 10px; background: #68655f; color: #fff; }
+#status { min-height: 28px; color: #bde0bd; overflow-wrap: anywhere; }
+#status.error { color: #ffb4a5; }
